@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>吃王時鐘</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="icon.png">
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBawj4bEAcigqNWhinqb9cdgRhPB3xoczI",
+      authDomain: "boss1-951e9.firebaseapp.com",
+      projectId: "boss1-951e9",
+      storageBucket: "boss1-951e9.firebasestorage.app",
+      messagingSenderId: "895211110238",
+      appId: "1:895211110238:web:0638a314002796cbfe19cf"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const timersRef = collection(db, "timers");
+
+    const timers = new Map();
+
+    async function addTimer() {
+      const label = document.getElementById('labelInput').value.trim();
+      const minutes = parseInt(document.getElementById('minutesInput').value);
+      if (!label || isNaN(minutes) || minutes <= 0) return;
+
+      await addDoc(timersRef, {
+        label,
+        baseMinutes: minutes,
+        endTime: Date.now() + minutes * 60000,
+        triggered: false,
+        restarted: false,
+        warned: false,
+        missedCount: 0,
+        createdAt: serverTimestamp()
+      });
+    }
+
+    async function eatTimer(id, data) {
+      await updateDoc(doc(timersRef, id), {
+        endTime: Date.now() + data.baseMinutes * 60000,
+        triggered: false,
+        restarted: false,
+        warned: false
+      });
+    }
+
+    async function removeTimer(id) {
+      await deleteDoc(doc(timersRef, id));
+    }
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}分${s}秒`;
+    }
+
+    function createTimerElement(id, data) {
+      const timerDiv = document.createElement('div');
+      timerDiv.className = 'timer';
+
+      const labelEl = document.createElement('div');
+      labelEl.textContent = data.label;
+
+      const timeEl = document.createElement('div');
+      timeEl.textContent = '';
+
+      const eatBtn = document.createElement('button');
+      eatBtn.textContent = '吃掉了';
+      eatBtn.onclick = () => eatTimer(id, data);
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '移除';
+      delBtn.onclick = () => removeTimer(id);
+
+      timerDiv.appendChild(labelEl);
+      timerDiv.appendChild(timeEl);
+      timerDiv.appendChild(eatBtn);
+      timerDiv.appendChild(delBtn);
+
+      timerDiv._labelEl = labelEl;
+      timerDiv._timeEl = timeEl;
+
+      return timerDiv;
+    }
+
+    function updateTimers() {
+      const now = Date.now();
+      const container = document.getElementById('timersContainer');
+      container.innerHTML = '';
+
+      const sorted = Array.from(timers.entries()).sort(([, a], [, b]) => {
+        const ra = Math.max(0, Math.floor((a.endTime - now) / 1000));
+        const rb = Math.max(0, Math.floor((b.endTime - now) / 1000));
+        return ra - rb;
+      });
+
+      for (const [id, data] of sorted) {
+        const remaining = Math.max(0, Math.floor((data.endTime - now) / 1000));
+        const elapsed = Math.floor((now - data.endTime) / 1000);
+
+        if (!data.warned && remaining === 180) {
+          data.warned = true;
+          if (Notification.permission === 'granted') {
+            new Notification(`⚔️ ${data.label} 3 分鐘後出生！`, {
+              body: '準備集合擊殺！',
+              icon: 'icon.png'
+            });
+          }
+        }
+
+        if (remaining > 0) {
+          data.element._timeEl.textContent = formatTime(remaining);
+        } else {
+          if (!data.triggered) {
+            data.triggered = true;
+            if (Notification.permission === 'granted') {
+              new Notification(`${data.label} 時間到！`, {
+                body: '快去吃王！',
+                icon: 'icon.png'
+              });
+            }
+            data.element._timeEl.textContent = '時間到！';
+          }
+
+          if (elapsed >= 180 && !data.restarted) {
+            data.restarted = true;
+            data.triggered = false;
+            data.warned = false;
+            data.missedCount = (data.missedCount || 0) + 1;
+            data.endTime = now + data.baseMinutes * 60000;
+            data.element._labelEl.textContent = `${data.label}（過${data.missedCount}）`;
+          }
+        }
+
+        container.appendChild(data.element);
+      }
+    }
+
+    onSnapshot(timersRef, snapshot => {
+      timers.clear();
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        data.element = createTimerElement(docSnap.id, data);
+        timers.set(docSnap.id, data);
+      });
+    });
+
+    setInterval(updateTimers, 1000);
+
+    window.onload = () => {
+      if (Notification.permission !== 'granted') {
+        Notification.requestPermission();
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+  </script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+      background-color: #000;
+      color: #fff;
+      font-size: 36px;
+    }
+
+    h1 {
+      font-size: 56px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .container {
+      padding: 30px;
+      max-width: 700px;
+      margin: auto;
+    }
+
+    input, button {
+      margin: 12px 0;
+      padding: 20px;
+      width: 100%;
+      box-sizing: border-box;
+      background-color: #111;
+      color: #fff;
+      border: 1px solid #444;
+      font-size: 36px;
+    }
+
+    .timer {
+      margin-top: 30px;
+      padding: 25px;
+      background-color: #222;
+      border: 1px solid #444;
+      border-radius: 8px;
+    }
+
+    .timer div:first-child {
+      font-size: 40px;
+      font-weight: bold;
+    }
+
+    .timer div:nth-child(2) {
+      font-size: 48px;
+      color: #0f0;
+      margin-top: 10px;
+    }
+
+    .timer button {
+      background-color: #444;
+      color: white;
+      border: none;
+      padding: 16px 20px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin-top: 15px;
+      font-size: 32px;
+      margin-right: 10px;
+    }
+
+    .timer button:hover {
+      background-color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>吃王時鐘</h1>
+    <label>野王名稱：</label>
+    <input type="text" id="labelInput" placeholder="輸入野王名稱">
+    <label>剩餘時間：</label>
+    <input type="number" id="minutesInput" placeholder="例如：5">
+    <button onclick="addTimer()">新增</button>
+    <div id="timersContainer"></div>
+  </div>
+</body>
+</html>
