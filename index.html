@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>吃王時鐘</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="icon.png">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+      background-color: #000;
+      color: #fff;
+      font-size: 36px;
+    }
+
+    h1 {
+      font-size: 56px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .container {
+      padding: 30px;
+      max-width: 700px;
+      margin: auto;
+    }
+
+    input, select, button {
+      margin: 12px 0;
+      padding: 20px;
+      width: 100%;
+      box-sizing: border-box;
+      background-color: #111;
+      color: #fff;
+      border: 1px solid #444;
+      font-size: 36px;
+    }
+
+    .timer {
+      margin-top: 30px;
+      padding: 25px;
+      background-color: #222;
+      border: 1px solid #444;
+      border-radius: 8px;
+    }
+
+    .timer div:first-child {
+      font-size: 40px;
+      font-weight: bold;
+    }
+
+    .timer div:nth-child(2) {
+      font-size: 48px;
+      color: #0f0;
+      margin-top: 10px;
+    }
+
+    .timer button {
+      background-color: #444;
+      color: white;
+      border: none;
+      padding: 16px 20px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin-top: 15px;
+      font-size: 32px;
+      margin-right: 10px;
+    }
+
+    .timer button:hover {
+      background-color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>吃王時鐘</h1>
+
+    <label>選擇野王：</label>
+    <select id="savedBossList" onchange="selectSavedBoss()">
+      <option value="">請選擇</option>
+    </select>
+
+    <label>野王名稱：</label>
+    <input type="text" id="labelInput" placeholder="輸入野王名稱">
+
+    <label>剩餘時間：</label>
+    <input type="number" id="minutesInput" placeholder="例如：5">
+
+    <button onclick="addTimer()">增新</button>
+    <button onclick="saveBoss()">加入清單</button>
+
+    <div id="timersContainer"></div>
+  </div>
+
+  <script>
+    const timers = [];
+
+    function saveBoss() {
+      const name = document.getElementById('labelInput').value.trim();
+      const minutes = parseInt(document.getElementById('minutesInput').value);
+
+      if (!name || isNaN(minutes) || minutes <= 0) return;
+
+      const saved = JSON.parse(localStorage.getItem('bossList') || '{}');
+      saved[name] = minutes;
+      localStorage.setItem('bossList', JSON.stringify(saved));
+      loadBossList();
+    }
+
+    function loadBossList() {
+      const select = document.getElementById('savedBossList');
+      select.innerHTML = '<option value="">請選擇</option>';
+
+      const saved = JSON.parse(localStorage.getItem('bossList') || '{}');
+      for (const name in saved) {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = `${name}（${saved[name]}分鐘）`;
+        option.setAttribute('data-minutes', saved[name]);
+        select.appendChild(option);
+      }
+    }
+
+    function selectSavedBoss() {
+      const select = document.getElementById('savedBossList');
+      const selected = select.options[select.selectedIndex];
+      const name = selected.value;
+      const minutes = selected.getAttribute('data-minutes');
+
+      if (name && minutes) {
+        document.getElementById('labelInput').value = name;
+        document.getElementById('minutesInput').value = minutes;
+      }
+    }
+
+    function addTimer() {
+      const label = document.getElementById('labelInput').value || '野王';
+      const minutes = parseInt(document.getElementById('minutesInput').value);
+      if (isNaN(minutes) || minutes <= 0) return;
+
+      const endTime = new Date().getTime() + minutes * 60000;
+
+      const timer = {
+        label,
+        baseMinutes: minutes,
+        endTime,
+        triggered: false,
+        restarted: false,
+        warned: false,
+        missedCount: 0,
+        element: createTimerElement(label)
+      };
+
+      timers.push(timer);
+      document.getElementById('timersContainer').appendChild(timer.element);
+    }
+
+    function createTimerElement(label) {
+      const timerDiv = document.createElement('div');
+      timerDiv.className = 'timer';
+
+      const labelEl = document.createElement('div');
+      labelEl.textContent = label;
+
+      const timeEl = document.createElement('div');
+      timeEl.textContent = '';
+
+      const eatBtn = document.createElement('button');
+      eatBtn.textContent = '吃掉了';
+      eatBtn.onclick = () => {
+        const timer = timers.find(t => t.element === timerDiv);
+        if (timer) {
+          timer.endTime = new Date().getTime() + timer.baseMinutes * 60000;
+          timer.triggered = false;
+          timer.restarted = false;
+          timer.warned = false;
+          labelEl.textContent = timer.label;
+        }
+      };
+
+      const stopBtn = document.createElement('button');
+      stopBtn.textContent = '移除';
+      stopBtn.onclick = () => {
+        timers.splice(timers.findIndex(t => t.element === timerDiv), 1);
+        timerDiv.remove();
+      };
+
+      timerDiv.appendChild(labelEl);
+      timerDiv.appendChild(timeEl);
+      timerDiv.appendChild(eatBtn);
+      timerDiv.appendChild(stopBtn);
+
+      timerDiv._labelEl = labelEl;
+      timerDiv._timeEl = timeEl;
+
+      return timerDiv;
+    }
+
+    function updateTimers() {
+      const now = new Date().getTime();
+
+      timers.forEach(timer => {
+        const remaining = Math.max(0, Math.floor((timer.endTime - now) / 1000));
+        timer.remaining = remaining;
+
+        if (!timer.warned && remaining === 180) {
+          timer.warned = true;
+          if (Notification.permission === 'granted') {
+            new Notification(`⚔️ ${timer.label} 3 分鐘後出生！`, {
+              body: '準備集合擊殺！',
+              icon: 'icon.png'
+            });
+          }
+        }
+
+        if (remaining > 0) {
+          timer.element._timeEl.textContent = formatTime(remaining);
+        } else {
+          const elapsed = Math.floor((now - timer.endTime) / 1000);
+
+          if (!timer.triggered) {
+            timer.triggered = true;
+            if (Notification.permission === 'granted') {
+              new Notification(`${timer.label} 時間到！`, {
+                body: '快去吃王！',
+                icon: 'icon.png'
+              });
+            }
+            timer.element._timeEl.textContent = '時間到！';
+          }
+
+          if (elapsed >= 180 && !timer.restarted) {
+            timer.restarted = false;
+            timer.triggered = false;
+            timer.warned = false;
+            timer.missedCount += 1;
+            timer.endTime = now + timer.baseMinutes * 60000;
+            timer.element._labelEl.textContent = `${timer.label}（過${timer.missedCount}）`;
+          }
+        }
+      });
+
+      timers.sort((a, b) => a.remaining - b.remaining);
+
+      const container = document.getElementById('timersContainer');
+      timers.forEach(timer => {
+        container.appendChild(timer.element);
+      });
+    }
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}分${s}秒`;
+    }
+
+    setInterval(updateTimers, 1000);
+
+    window.onload = () => {
+      loadBossList();
+      if (Notification.permission !== 'granted') {
+        Notification.requestPermission();
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+  </script>
+</body>
+</
